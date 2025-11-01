@@ -1,0 +1,6 @@
+../Core/Src/actuator.c:36:6:MotorAktuatorKontrol	16	static
+../Core/Src/actuator.c:75:6:MotorAktuatorUpdate	16	static
+../Core/Src/actuator.c:102:6:MotorAktuatorStop	8	static
+../Core/Src/actuator.c:116:9:IsMotorRunning	4	static
+../Core/Src/actuator.c:121:9:GetMotorFlag	4	static
+../Core/Src/actuator.c:126:6:ClearMotorFlag	4	static

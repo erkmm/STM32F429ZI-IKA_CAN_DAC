@@ -1,0 +1,1159 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file           : main.c
+  * @brief          : Main program body
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2025 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+
+#include "stdbool.h"
+#include "math.h"
+#include <stdio.h>
+#include <string.h>
+#include "actuator.h"
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+
+#define CAN_ID1 0x101
+#define CAN_ID2 0x102
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+CAN_HandleTypeDef hcan1;
+CAN_HandleTypeDef hcan2;
+
+DAC_HandleTypeDef hdac;
+
+TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
+
+UART_HandleTypeDef huart1;
+UART_HandleTypeDef huart2;
+
+/* USER CODE BEGIN PV */
+CAN_RxHeaderTypeDef pRxHeader;
+CAN_RxHeaderTypeDef pRxHeader2;
+
+CAN_TxHeaderTypeDef TxHeader_ID0;
+CAN_TxHeaderTypeDef TxHeader_ID1;
+CAN_TxHeaderTypeDef TxHeader_ID2;
+CAN_TxHeaderTypeDef TxHeader_ID3;
+CAN_TxHeaderTypeDef TxHeader_ID4;
+
+uint8_t TxData[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+HAL_StatusTypeDef FDCANErrCode;
+
+uint16_t adcBuffer[100];
+int16_t *TX_Ser_Val;
+uint16_t comm_timeout = 0;
+
+uint8_t received_data[8] = {0}; // Gelen veriler
+uint8_t received_data2[8] = {0}; // Gelen veriler
+
+uint8_t a1[8] = {0};
+
+// Status Flags
+uint8_t adc_flag = 0;
+
+volatile int16_t i_direction_value = 0;
+
+volatile uint16_t speed_value = 0;
+volatile int16_t i_speed_value = 0;
+
+volatile bool left_direction = 0;  // sola_topuk
+volatile bool right_direction = 0; // saga_topuk
+
+bool ileri_komutu = 0;
+
+volatile struct
+{
+    uint16_t speed_value;      // Byte0-1
+    int16_t direction_value;  // Byte2-3
+    uint8_t  pivot_mode; // Byte4
+    // Byte5
+    uint8_t brake_status : 1;       // fren_bilgisi
+    uint8_t auto_manual_mode : 1;   // auto_manual
+    uint8_t headlight_state : 1;    // far_durumu_bilgisi
+    uint8_t connection_status : 1;  // baglanti_kontrol
+
+    uint8_t reverse_direction; // Byte6
+    uint8_t control_mode; // Byte7
+
+}M100_flags_t;
+
+volatile struct
+{
+    uint8_t remote_emergency : 1;   // kumanda_acil
+    uint8_t mine_emergency : 1;     // mayin_acil
+    uint8_t barrier_emergency : 1; // engel_acil
+    uint8_t reserved : 5; // kullanılmayan bitler
+} M101_data_t;
+
+bool m100 = 0;
+bool m101 = 0;
+
+uint32_t lastCanTick = 0;
+bool canTimeout = false;
+
+static uint32_t emergencyReleaseTime = 0;
+
+volatile bool isInEmergencyState = false;
+
+uint8_t break_flag = 0;
+
+uint32_t lastDirectionChangeTime = 0;
+uint8_t lastDirectionValue = 0xFF; // İlk değer varsayılan (farklı bir değer)
+
+uint16_t mainTick = 0;
+uint16_t main_Timeout = 0;
+uint8_t state = 0;
+
+volatile uint32_t last_direction_change_tick = 0;
+static int16_t previous_direction_value = 0;
+static uint32_t last_change_time = 0;
+
+static uint32_t last_change_time2 = 0;
+
+
+static int16_t previous_brake_value = 0;
+uint32_t TxMailbox;
+uint32_t TxMailbox2;
+
+volatile uint32_t last_direction_change_tick_2 = 0;
+
+uint32_t brake_timer = 0;
+uint8_t brake_active = 0;
+
+// 0: Released (both pins LOW)
+// 1: Engaging (Break_On HIGH, Break_Off LOW)
+// 2: Disengaging (Break_On LOW, Break_Off HIGH)
+uint8_t brake_state = 0;
+uint8_t brake_flag = 0;
+
+uint32_t brake_timer1 = 0;
+uint32_t brake_timer2 = 0;
+
+uint32_t brake_action_start_time = 0; // Fren eyleminin başladığı zaman
+
+static uint8_t R1_triggered = 0;
+static uint8_t R1_state = 0;
+static uint32_t R1_start_time = 0;
+
+static uint8_t R1_triggered2 = 0;
+static uint8_t R1_state2 = 0;
+static uint32_t R1_start_time2 = 0;
+
+uint16_t current_torque = 0;
+uint16_t current_rpm = 0;
+
+uint8_t count = 0;
+
+int16_t pwm_value=0;
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_CAN1_Init(void);
+static void MX_CAN2_Init(void);
+static void MX_DAC_Init(void);
+static void MX_TIM2_Init(void);
+static void MX_USART1_UART_Init(void);
+static void MX_USART2_UART_Init(void);
+static void MX_TIM3_Init(void);
+/* USER CODE BEGIN PFP */
+
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+PUTCHAR_PROTOTYPE
+{
+    HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
+    return ch;
+}
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+    HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &pRxHeader, received_data);
+    lastCanTick = HAL_GetTick();
+    if (pRxHeader.StdId == 0x100)
+    {
+        m100 = 1;
+
+        for (int i = 0; i < 8; i++)
+            a1[i] = received_data[i];
+
+        // 16-bit alanları LSB-first olarak birleştir
+        M100_flags_t.speed_value = ((uint16_t)a1[1] << 8) | (uint16_t)a1[0];
+        M100_flags_t.direction_value = ((uint16_t)a1[3] << 8) | (uint16_t)a1[2];
+        M100_flags_t.pivot_mode = a1[4];
+
+        uint8_t flags = a1[5];
+
+        M100_flags_t.brake_status = (flags >> 0) & 0x01;
+        M100_flags_t.auto_manual_mode = (flags >> 1) & 0x01;
+        M100_flags_t.headlight_state = (flags >> 3) & 0x01;
+        M100_flags_t.connection_status = (flags >> 4) & 0x01;
+
+        M100_flags_t.reverse_direction = a1[6];
+        M100_flags_t.control_mode = a1[7];
+
+        i_speed_value = M100_flags_t.speed_value;
+        i_direction_value = M100_flags_t.direction_value;
+        printf("Speed=%u Dir=%d AutoSpd=%u Brake=%u RevDir=%X CtrlMode=%X\n",
+               M100_flags_t.speed_value,
+			   i_direction_value,
+               M100_flags_t.pivot_mode,
+               M100_flags_t.brake_status,
+               M100_flags_t.reverse_direction,
+               M100_flags_t.control_mode);
+    }
+
+    else if (pRxHeader.StdId == 0x101)
+        {
+            m101 = 1;
+            brake_flag = 1;
+
+            M101_data_t.mine_emergency = (received_data[0] >> 0) & 0x01;   //  1. bit
+            M101_data_t.remote_emergency = (received_data[0] >> 1) & 0x01; //  2. bit
+            M101_data_t.barrier_emergency = (received_data[0] >> 2) & 0x01;   //  3. bit
+        }
+    else if (pRxHeader.ExtId == 0x10F90738)
+        {
+        	current_torque = ((uint16_t)received_data[3] << 8) | ((uint16_t)received_data[2]);
+        	current_rpm = ((uint16_t)received_data[7] << 8) | ((uint16_t)received_data[6]);
+        }
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+	if (htim->Instance == TIM2)  // TIM2 kesmesi geldiyse
+	{
+		count++;
+		if (count > 100) {
+			count = 0;
+			printf("sending %u\n", lastCanTick);
+		}
+		if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader_ID3, TxData, &TxMailbox)
+				== HAL_OK) {
+			comm_timeout = 0;
+		} else {
+			comm_timeout += 100;  // 10 ms arttır (timer periodu kadar)
+		}
+		if (comm_timeout >= 500) {
+			HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET); // Örnek LED yak
+		} else {
+			HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_RESET); // Normalde kapalı
+		}
+
+	}
+}
+
+/*void CheckCanTimeout(void)
+{
+
+    uint32_t now = HAL_GetTick();
+
+    const uint32_t TIMEOUT_DURATION_MS = 500;
+
+    if ((now - lastCanTick) >= TIMEOUT_DURATION_MS)
+    {
+        if (!canTimeout)
+        {
+            direction_value = 0;
+            memset(received_data, 0, sizeof(received_data));
+            memset(a1, 0, sizeof(a1));
+
+            canTimeout = true;
+        }
+    }
+    else
+    {
+        if (canTimeout)
+        {
+            canTimeout = false;
+        }
+    }
+}*/
+
+// Fonksiyonlar
+void Brake_Engage(void)
+{
+    if (brake_state != 1) // Only engage if not already in the 'Engaging' state
+    {
+        HAL_GPIO_WritePin(Break_On_GPIO_Port, Break_On_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(Break_Off_GPIO_Port, Break_Off_Pin, GPIO_PIN_RESET);
+
+        brake_timer1 = HAL_GetTick();  // Start brake timer
+        brake_state = 1;               // Set state to Engaging
+
+        // R1 tetiklemesini başlat
+        R1_triggered = 0;
+        R1_state = 0;
+    }
+
+    // R1 pini tetiklenmediyse işlemi başlat
+    if (R1_triggered == 0)
+    {
+        if (R1_state == 0)
+        {
+            HAL_GPIO_WritePin(R1_GPIO_Port, R1_Pin, GPIO_PIN_SET);
+            R1_start_time = HAL_GetTick();  // Zamanı başlat
+            R1_state = 1;
+        }
+        else if (R1_state == 1 && (HAL_GetTick() - R1_start_time >= 2500))
+        {
+            HAL_GPIO_WritePin(R1_GPIO_Port, R1_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(Break_On_GPIO_Port, Break_On_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(Break_Off_GPIO_Port, Break_Off_Pin, GPIO_PIN_RESET);
+            R1_triggered = 1;
+            R1_state = 0;
+        }
+    }
+}
+
+void Brake_Disengage(void)
+{
+    if (brake_state != 2) // Only disengage if not already in the 'Disengaging' state
+    {
+        HAL_GPIO_WritePin(Break_On_GPIO_Port, Break_On_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(Break_Off_GPIO_Port, Break_Off_Pin, GPIO_PIN_SET);
+
+        brake_timer1 = HAL_GetTick();  // Start timer
+        brake_state = 2;               // Set state to Disengaging
+
+        R1_triggered2 = 0;
+        R1_state2 = 0;
+    }
+
+    // R1 pini tetiklenmediyse işlemi başlat
+    if (R1_triggered2 == 0)
+    {
+        if (R1_state2 == 0)
+        {
+            HAL_GPIO_WritePin(R1_GPIO_Port, R1_Pin, GPIO_PIN_RESET);
+            R1_start_time2 = HAL_GetTick();  // Zamanı başlat
+            R1_state2 = 1;
+
+            R1_triggered2 = 0;
+            R1_state2 = 0;
+        }
+        else if (R1_state2 == 1 && (HAL_GetTick() - R1_start_time2 >= 2500))
+        {
+            HAL_GPIO_WritePin(Break_On_GPIO_Port, Break_On_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(Break_Off_GPIO_Port, Break_Off_Pin, GPIO_PIN_RESET);
+            R1_triggered2 = 1;
+            R1_state2 = 0;
+        }
+    }
+}
+
+void Brake_Release(void)
+{
+    if (brake_state != 0) // Only release if not already in the 'Released' state
+    {
+        HAL_GPIO_WritePin(Break_On_GPIO_Port, Break_On_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(Break_Off_GPIO_Port, Break_Off_Pin, GPIO_PIN_RESET);
+        brake_state = 0; // Set state to Released
+    }
+}
+
+void Brake_Update(void)
+{
+    // Check if we are in an active (Engaging or Disengaging) state
+    if (brake_state == 1 || brake_state == 2)
+    {
+        // Check if the required time has passed since the action started
+        if ((HAL_GetTick() - brake_timer1) >= 5000)
+        {
+            // After 1000ms, set both pins LOW (Release state)
+            Brake_Release();
+        }
+    }
+}
+void Check_Direction_Stability()
+{
+    uint32_t now = HAL_GetTick();  // Şu anki zamanı al (ms cinsinden)
+
+    if (M100_flags_t.direction_value != previous_direction_value)
+    {
+        // Değer değişti, zamanı güncelle
+        previous_direction_value = M100_flags_t.direction_value;
+        last_change_time = now;
+    }
+    else
+    {
+        // Değer değişmediyse 500 ms geçti mi diye kontrol et
+        if ((now - last_change_time) >= 250) // önceki 500 ms
+        {
+            M100_flags_t.direction_value = 0;
+            last_change_time = now;  // Sıfırladıktan sonra zamanı güncelle
+        }
+    }
+}
+
+
+void Check_Brake_Stability()
+{
+    uint32_t now2 = HAL_GetTick();  // Şu anki zamanı al (ms cinsinden)
+
+    if (M101_data_t.mine_emergency != previous_brake_value)
+    {
+        // Değer değişti, zamanı güncelle
+        previous_brake_value = M101_data_t.mine_emergency;
+        last_change_time2 = now2;
+    }
+    else
+    {
+        // Değer değişmediyse 500 ms geçti mi diye kontrol et
+        if ((now2 - last_change_time2) >= 500)
+        {
+            Brake_Release();
+            last_change_time2 = now2;  // Sıfırladıktan sonra zamanı güncelle
+        }
+    }
+}
+
+
+void EmergencyStop()
+{
+
+    if (M101_data_t.remote_emergency || M101_data_t.mine_emergency || M101_data_t.barrier_emergency || M100_flags_t.brake_status)
+    {
+
+        memset(received_data, 0, sizeof(received_data));
+        memset(a1, 0, sizeof(a1));
+
+
+        isInEmergencyState = true;
+        emergencyReleaseTime = HAL_GetTick();
+    }
+    else if ((!M101_data_t.remote_emergency && !M101_data_t.mine_emergency && !M101_data_t.barrier_emergency && !M100_flags_t.brake_status))
+    {
+
+        isInEmergencyState = false;
+    }
+}
+/* USER CODE END 0 */
+
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
+int main(void)
+{
+
+  /* USER CODE BEGIN 1 */
+
+  /* USER CODE END 1 */
+
+  /* MCU Configuration--------------------------------------------------------*/
+
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  HAL_Init();
+
+  /* USER CODE BEGIN Init */
+
+  /* USER CODE END Init */
+
+  /* Configure the system clock */
+  SystemClock_Config();
+
+  /* USER CODE BEGIN SysInit */
+
+  /* USER CODE END SysInit */
+
+  /* Initialize all configured peripherals */
+  MX_GPIO_Init();
+  MX_CAN1_Init();
+  MX_CAN2_Init();
+  MX_DAC_Init();
+  MX_TIM2_Init();
+  MX_USART1_UART_Init();
+  MX_USART2_UART_Init();
+  MX_TIM3_Init();
+  /* USER CODE BEGIN 2 */
+
+  HAL_TIM_Base_Start_IT(&htim2);
+  HAL_TIM_Base_Start(&htim2);
+
+  TX_Ser_Val = (int16_t *)&TxData[0];
+  CAN_FilterTypeDef canfilter1;
+  canfilter1.FilterBank = 0;
+  canfilter1.FilterFIFOAssignment = CAN_RX_FIFO0;
+  canfilter1.FilterIdHigh = 0x0000;
+  canfilter1.FilterIdLow = 0x0000;
+  canfilter1.FilterMaskIdHigh = 0x0000;
+  canfilter1.FilterMaskIdLow = 0x0000;
+  canfilter1.FilterMode = CAN_FILTERMODE_IDMASK;
+  canfilter1.FilterScale = CAN_FILTERSCALE_32BIT;
+  canfilter1.FilterActivation = CAN_FILTER_ENABLE;
+  canfilter1.SlaveStartFilterBank = 14;
+
+  HAL_CAN_ConfigFilter(&hcan1, &canfilter1);
+
+  // CAN2 Filter (uses banks 14-27)
+  CAN_FilterTypeDef canfilter2;
+  canfilter2.FilterBank = 14;  // Must be >= SlaveStartFilterBank
+  canfilter2.FilterFIFOAssignment = CAN_RX_FIFO0;
+  canfilter2.FilterIdHigh = 0x0000;
+  canfilter2.FilterIdLow = 0x0000;
+  canfilter2.FilterMaskIdHigh = 0x0000;
+  canfilter2.FilterMaskIdLow = 0x0000;
+  canfilter2.FilterMode = CAN_FILTERMODE_IDMASK;
+  canfilter2.FilterScale = CAN_FILTERSCALE_32BIT;
+  canfilter2.FilterActivation = CAN_FILTER_ENABLE;
+
+  HAL_CAN_ConfigFilter(&hcan2, &canfilter2);
+
+  if (HAL_CAN_Start(&hcan1) != HAL_OK)
+  {
+      Error_Handler();
+  }
+
+  if (HAL_CAN_Start(&hcan2) != HAL_OK)
+  {
+      Error_Handler();
+  }
+  HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
+  HAL_DAC_Start(&hdac, DAC_CHANNEL_2);
+  HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+  HAL_CAN_ActivateNotification(&hcan2, CAN_IT_RX_FIFO0_MSG_PENDING);
+  HAL_CAN_ActivateNotification(&hcan1, CAN_IT_TX_MAILBOX_EMPTY);
+  HAL_CAN_ActivateNotification(&hcan2, CAN_IT_TX_MAILBOX_EMPTY);
+
+  TxHeader_ID1.ExtId = 0x10F81807;
+  TxHeader_ID1.IDE = CAN_ID_EXT;
+  TxHeader_ID1.RTR = CAN_RTR_DATA;
+  TxHeader_ID1.DLC = 8;
+  TxHeader_ID1.TransmitGlobalTime = DISABLE;
+
+  TxHeader_ID2.ExtId = 0x10F82807;
+  TxHeader_ID2.IDE = CAN_ID_EXT;
+  TxHeader_ID2.RTR = CAN_RTR_DATA;
+  TxHeader_ID2.DLC = 8;
+  TxHeader_ID2.TransmitGlobalTime = DISABLE;
+
+  TxHeader_ID3.ExtId = 0x10F83807;
+  TxHeader_ID3.IDE = CAN_ID_EXT;
+  TxHeader_ID3.RTR = CAN_RTR_DATA;
+  TxHeader_ID3.DLC = 8;
+  TxHeader_ID3.TransmitGlobalTime = DISABLE;
+
+  TxHeader_ID4.ExtId = 0x10F84807;
+  TxHeader_ID4.IDE = CAN_ID_EXT;
+  TxHeader_ID4.RTR = CAN_RTR_DATA;
+  TxHeader_ID4.DLC = 8;
+  TxHeader_ID4.TransmitGlobalTime = DISABLE;
+
+  TxData[0] = 0x05;
+  TxData[2] = 0x00;
+  TxData[3] = 0xC0;
+  TxData[4] = 0x08;
+  TxData[5] = 0x07;
+  TxData[6] = 0x08;
+  TxData[7] = 0x07;
+
+//  TX_Ser_Val[2] = 10;
+//  TX_Ser_Val[3] = 10;
+  /* USER CODE END 2 */
+
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
+//	  HAL_Delay(5);
+
+//	  HAL_GPIO_TogglePin(R2_GPIO_Port, R2_Pin);
+//	  HAL_CAN_AddTxMessage(&hcan1, &TxHeader_ID3, TxData, &TxMailbox);
+	  //AL_CAN_AddTxMessage(&hcan2, &TxHeader_ID3, TxData, &TxMailbox2);
+
+	/*	EmergencyStop();
+		Check_Direction_Stability();
+
+		if (!isInEmergencyState) {
+			// If not in emergency, the brake should be in the ENGAGED state.
+			//Brake_Engage(); // This will only run if brake_state is NOT 1 (Engaging)
+			Brake_Disengage();
+			if (M100_flags_t.speed_value > 150) {
+				TxData[0] = 0x05;
+				TxData[2] = M100_flags_t.reverse_direction = a1[6];
+				TxData[3] = M100_flags_t.control_mode;
+				TX_Ser_Val[2] = M100_flags_t.speed_value;
+				TX_Ser_Val[3] = M100_flags_t.speed_value;
+
+				HAL_CAN_AddTxMessage(&hcan1, &TxHeader_ID3, TxData, &TxMailbox);
+				HAL_CAN_AddTxMessage(&hcan2, &TxHeader_ID3, TxData, &TxMailbox);
+			}
+			if (M100_flags_t.auto_speed_value > 150) {
+				TxData[0] = 0x05;
+				TxData[2] = M100_flags_t.reverse_direction = a1[6];
+				TxData[3] = M100_flags_t.control_mode;
+				TX_Ser_Val[2] = M100_flags_t.auto_speed_value;
+				TX_Ser_Val[3] = M100_flags_t.auto_speed_value;
+
+				HAL_CAN_AddTxMessage(&hcan1, &TxHeader_ID3, TxData, &TxMailbox);
+				HAL_CAN_AddTxMessage(&hcan2, &TxHeader_ID3, TxData, &TxMailbox);
+			}
+
+			// Yön komutu 200 ile 1000 arasındaysa (Sağa dönme)
+			if (M100_flags_t.direction_value >= 200
+					&& M100_flags_t.direction_value <= 1000) {
+				// Sol motor ON, Sağ motor OFF
+				HAL_GPIO_WritePin(L_EN_GPIO_Port, L_EN_Pin, GPIO_PIN_SET); // Sol motor çalışır
+				HAL_GPIO_WritePin(R_EN_GPIO_Port, R_EN_Pin, GPIO_PIN_RESET); // Sağ motor durur
+
+				HAL_GPIO_WritePin(R2_GPIO_Port, R2_Pin, GPIO_PIN_RESET);
+
+				// Durum sıfırlanır, bir sonraki merkezlenmede R2 tekrar set edilebilsin
+				R2_triggered = 0;
+				R2_state = 0;
+			}
+			// Yön komutu -1000 ile -200 arasındaysa (Sola dönme)
+			else if (M100_flags_t.direction_value < -200
+					&& M100_flags_t.direction_value >= -1000) {
+				// Sağ motor ON, Sol motor OFF
+				HAL_GPIO_WritePin(R_EN_GPIO_Port, R_EN_Pin, GPIO_PIN_SET); // Sağ motor çalışır
+				HAL_GPIO_WritePin(L_EN_GPIO_Port, L_EN_Pin, GPIO_PIN_RESET); // Sol motor durur
+
+				HAL_GPIO_WritePin(R2_GPIO_Port, R2_Pin, GPIO_PIN_RESET);
+
+				// Durum sıfırlanır
+				R2_triggered = 0;
+				R2_state = 0;
+			}
+			// Komut 200 ile -200 arasındaysa (Merkez veya durma)
+			else {
+				HAL_GPIO_WritePin(R_EN_GPIO_Port, R_EN_Pin, GPIO_PIN_RESET); // Sağ motor durur
+				HAL_GPIO_WritePin(L_EN_GPIO_Port, L_EN_Pin, GPIO_PIN_RESET); // Sol motor durur
+
+				if (R2_triggered == 0) {
+					if (R2_state == 0) {
+						// R2 SET edilir ve zaman başlatılır
+						//HAL_GPIO_WritePin(R2_GPIO_Port, R2_Pin, GPIO_PIN_SET);
+						R2_start_time = HAL_GetTick();  // Mevcut zamanı al
+						R2_state = 1;
+					} else if (R2_state == 1
+							&& (HAL_GetTick() - R2_start_time >= 6000)) {
+						// 500ms sonra R2 RESET edilir ve işlem tamamlanır
+						HAL_GPIO_WritePin(R2_GPIO_Port, R2_Pin, GPIO_PIN_RESET);
+						R2_triggered = 1;  // Bir daha tetiklenmemesi için
+						R2_state = 0;
+					}
+				}
+			}
+
+		} else {
+			// If in emergency, the brake should be in the DISENGAGED state.
+			// Brake_Disengage(); // This will only run if brake_state is NOT 2 (Disengaging)
+			Brake_Engage();
+		}*/
+//		if (m100 == 1)
+//	    {
+			// Hız ve yön belirleme (ileri = 0, geri = 1)
+			if (i_speed_value < 0)
+			    i_speed_value = -i_speed_value; // mutlak değer al
+
+			// PWM değeri hesaplanıyor (0-3300 arası)
+		pwm_value = (uint16_t)((i_speed_value * 3300) / 1000);
+
+	    HAL_DAC_SetValue(&hdac, DAC_CHANNEL_1, DAC_ALIGN_12B_R, pwm_value);
+	    HAL_DAC_SetValue(&hdac, DAC_CHANNEL_2, DAC_ALIGN_12B_R, pwm_value);
+//	    }
+  }
+  /* USER CODE END 3 */
+}
+
+/**
+  * @brief System Clock Configuration
+  * @retval None
+  */
+void SystemClock_Config(void)
+{
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+
+  /** Configure the main internal regulator output voltage
+  */
+  __HAL_RCC_PWR_CLK_ENABLE();
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 160;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 4;
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Initializes the CPU, AHB and APB buses clocks
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
+
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/**
+  * @brief CAN1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CAN1_Init(void)
+{
+
+  /* USER CODE BEGIN CAN1_Init 0 */
+
+  /* USER CODE END CAN1_Init 0 */
+
+  /* USER CODE BEGIN CAN1_Init 1 */
+
+  /* USER CODE END CAN1_Init 1 */
+  hcan1.Instance = CAN1;
+  hcan1.Init.Prescaler = 10;
+  hcan1.Init.Mode = CAN_MODE_NORMAL;
+  hcan1.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan1.Init.TimeSeg1 = CAN_BS1_8TQ;
+  hcan1.Init.TimeSeg2 = CAN_BS2_7TQ;
+  hcan1.Init.TimeTriggeredMode = DISABLE;
+  hcan1.Init.AutoBusOff = DISABLE;
+  hcan1.Init.AutoWakeUp = ENABLE;
+  hcan1.Init.AutoRetransmission = DISABLE;
+  hcan1.Init.ReceiveFifoLocked = DISABLE;
+  hcan1.Init.TransmitFifoPriority = DISABLE;
+  if (HAL_CAN_Init(&hcan1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CAN1_Init 2 */
+
+  /* USER CODE END CAN1_Init 2 */
+
+}
+
+/**
+  * @brief CAN2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CAN2_Init(void)
+{
+
+  /* USER CODE BEGIN CAN2_Init 0 */
+
+  /* USER CODE END CAN2_Init 0 */
+
+  /* USER CODE BEGIN CAN2_Init 1 */
+
+  /* USER CODE END CAN2_Init 1 */
+  hcan2.Instance = CAN2;
+  hcan2.Init.Prescaler = 10;
+  hcan2.Init.Mode = CAN_MODE_NORMAL;
+  hcan2.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan2.Init.TimeSeg1 = CAN_BS1_8TQ;
+  hcan2.Init.TimeSeg2 = CAN_BS2_7TQ;
+  hcan2.Init.TimeTriggeredMode = DISABLE;
+  hcan2.Init.AutoBusOff = DISABLE;
+  hcan2.Init.AutoWakeUp = ENABLE;
+  hcan2.Init.AutoRetransmission = DISABLE;
+  hcan2.Init.ReceiveFifoLocked = DISABLE;
+  hcan2.Init.TransmitFifoPriority = DISABLE;
+  if (HAL_CAN_Init(&hcan2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CAN2_Init 2 */
+
+  /* USER CODE END CAN2_Init 2 */
+
+}
+
+/**
+  * @brief DAC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_DAC_Init(void)
+{
+
+  /* USER CODE BEGIN DAC_Init 0 */
+
+  /* USER CODE END DAC_Init 0 */
+
+  DAC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN DAC_Init 1 */
+
+  /* USER CODE END DAC_Init 1 */
+
+  /** DAC Initialization
+  */
+  hdac.Instance = DAC;
+  if (HAL_DAC_Init(&hdac) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** DAC channel OUT1 config
+  */
+  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
+  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
+  if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** DAC channel OUT2 config
+  */
+  if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN DAC_Init 2 */
+
+  /* USER CODE END DAC_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 80-1;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 999;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 160*20-1;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 9999;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * @brief GPIO Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_GPIO_Init(void)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
+
+  /* USER CODE END MX_GPIO_Init_1 */
+
+  /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOE_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOF_CLK_ENABLE();
+  __HAL_RCC_GPIOH_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOG_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOE, IN_2_1_Pin|Break_On_Pin|Break_Off_Pin|IN_2_2E0_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, IN_1_2_Pin|IN_1_1C6_Pin|R5_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(IN_1_1_GPIO_Port, IN_1_1_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, L_EN_Pin|R_EN_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOD, IN_2_1D8_Pin|R1_Pin|IN_2_2_Pin|R2_Pin
+                          |IN_3_1_Pin|Status_Led_Pin|IN_3_2_Pin|R3_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOG, R4_Pin|R8_Pin|R7_Pin|IN_1_2G7_Pin
+                          |R6_Pin|LED2_Pin|LED1_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, IN_3_2B4_Pin|IN_3_1B6_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : IN_2_1_Pin Break_On_Pin Break_Off_Pin IN_2_2E0_Pin */
+  GPIO_InitStruct.Pin = IN_2_1_Pin|Break_On_Pin|Break_Off_Pin|IN_2_2E0_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : IN_1_2_Pin IN_1_1C6_Pin R5_Pin */
+  GPIO_InitStruct.Pin = IN_1_2_Pin|IN_1_1C6_Pin|R5_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : IN_1_1_Pin */
+  GPIO_InitStruct.Pin = IN_1_1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(IN_1_1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : L_EN_Pin R_EN_Pin */
+  GPIO_InitStruct.Pin = L_EN_Pin|R_EN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : IN_2_1D8_Pin R1_Pin IN_2_2_Pin R2_Pin
+                           IN_3_1_Pin Status_Led_Pin IN_3_2_Pin R3_Pin */
+  GPIO_InitStruct.Pin = IN_2_1D8_Pin|R1_Pin|IN_2_2_Pin|R2_Pin
+                          |IN_3_1_Pin|Status_Led_Pin|IN_3_2_Pin|R3_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : R4_Pin R8_Pin R7_Pin IN_1_2G7_Pin
+                           R6_Pin LED2_Pin LED1_Pin */
+  GPIO_InitStruct.Pin = R4_Pin|R8_Pin|R7_Pin|IN_1_2G7_Pin
+                          |R6_Pin|LED2_Pin|LED1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : IN_3_2B4_Pin IN_3_1B6_Pin */
+  GPIO_InitStruct.Pin = IN_3_2B4_Pin|IN_3_1B6_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+
+  /* USER CODE END MX_GPIO_Init_2 */
+}
+
+/* USER CODE BEGIN 4 */
+
+/* USER CODE END 4 */
+
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
+  __disable_irq();
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
+}
+#ifdef USE_FULL_ASSERT
+/**
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
+void assert_failed(uint8_t *file, uint32_t line)
+{
+  /* USER CODE BEGIN 6 */
+  /* User can add his own implementation to report the file name and line number,
+     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* USER CODE END 6 */
+}
+#endif /* USE_FULL_ASSERT */
