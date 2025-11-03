@@ -1,0 +1,22 @@
+---
+BasedOnStyle: Google
+AccessModifierOffset: -4
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: InlineOnly
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterFunction: true
+  BeforeCatch: true
+  BeforeElse: true
+  AfterControlStatement: MultiLine
+BreakBeforeBraces: Custom
+ColumnLimit: 0
+IncludeBlocks: Preserve
+IndentCaseLabels: false
+IndentPPDirectives: BeforeHash
+IndentWidth: 4
+SpaceBeforeCpp11BracedList: true
+SpacesBeforeTrailingComments: 1
+TabWidth: 4

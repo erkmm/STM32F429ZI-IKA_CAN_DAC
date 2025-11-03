@@ -1,0 +1,23 @@
+# STM32CubeIDE build output folders
+/Debug/
+/Release/
+
+# Project-specific settings (local IDE configs)
+/.settings/
+/.metadata/
+/.cproject
+/.project
+
+# Build artifacts
+*.o
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+
+# Temporary / backup files
+*~
+*.bak
+*.swp
