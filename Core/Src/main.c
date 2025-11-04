@@ -24,8 +24,6 @@
 #include "stdbool.h"
 #include "string.h"
 #include "stdio.h"
-#include "steering.h"
-#include "actuator.h"
 
 /* USER CODE END Includes */
 
@@ -35,8 +33,32 @@
 
 #define CAN_ID1 0x101
 #define CAN_ID2 0x102
+/* USER CODE END PTD */
 
-// Rampa Kontrol Değişkenleri
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+CAN_HandleTypeDef hcan1;
+CAN_HandleTypeDef hcan2;
+
+DAC_HandleTypeDef hdac;
+
+TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim4;
+
+UART_HandleTypeDef huart1;
+UART_HandleTypeDef huart2;
+
+/* USER CODE BEGIN PV */
 volatile int16_t current_effective_speed = 0; // Motora uygulanan anlık hız
 
 uint32_t Actuator_Feedback[2];
@@ -55,7 +77,6 @@ volatile uint16_t r_dac_value = 0;
 volatile int16_t r_s_value = 0;
 volatile int16_t l_s_value = 0;
 
-//volatile uint16_t direction_value = 0;
 volatile int16_t i_direction_value = 0;
 
 volatile uint16_t speed_value = 0;
@@ -72,7 +93,6 @@ bool ileri_komutu = 0;
 volatile int16_t effective_speed = 0;
 volatile int16_t scale_value = 0;
 
-// info: this type uses bit fields for control/status flags from m100
 volatile struct
 {
     uint16_t speed_value;      // Byte0-1
@@ -100,8 +120,6 @@ volatile struct
 {
     uint16_t pivot_value; // pivot_value topuk_value
 } M103_data_t;
-
-// info: this type uses bit fields for emergency flags
 
 bool m100 = 0;
 bool m101 = 0;
@@ -153,7 +171,6 @@ static uint8_t R2_triggered = 0;
 static uint8_t R2_state = 0;
 static uint32_t R2_start_time = 0;
 
-
 static uint8_t R1_triggered = 0;
 static uint8_t R1_state = 0;
 static uint32_t R1_start_time = 0;
@@ -161,7 +178,6 @@ static uint32_t R1_start_time = 0;
 static uint8_t R1_triggered2 = 0;
 static uint8_t R1_state2 = 0;
 static uint32_t R1_start_time2 = 0;
-
 
 uint16_t current_torque = 0;
 uint16_t current_rpm = 0;
@@ -171,34 +187,6 @@ uint16_t comm_timeout = 0;
 
 int16_t pwm_value1=0;
 int16_t pwm_value2=0;
-
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
-
-/* Private variables ---------------------------------------------------------*/
-CAN_HandleTypeDef hcan1;
-CAN_HandleTypeDef hcan2;
-
-DAC_HandleTypeDef hdac;
-
-TIM_HandleTypeDef htim2;
-TIM_HandleTypeDef htim3;
-
-UART_HandleTypeDef huart1;
-UART_HandleTypeDef huart2;
-
-/* USER CODE BEGIN PV */
-// uint16_t dac_value;
-
 uint32_t pTxMailbox;
 uint32_t pTxMailbox2;
 uint32_t pTxMailbox3;
@@ -208,7 +196,6 @@ uint8_t rCount[8];
 CAN_TxHeaderTypeDef pTxHeader;
 CAN_TxHeaderTypeDef pTxHeader2;
 CAN_RxHeaderTypeDef pRxHeader;
-
 
 /* USER CODE END PV */
 
@@ -222,6 +209,7 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_CAN2_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 
 // it is for adc time test
@@ -236,7 +224,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc){
 /* USER CODE BEGIN 0 */
 PUTCHAR_PROTOTYPE
 {
-    HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
+    HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, 0xFFFF);
     return ch;
 }
 
@@ -273,7 +261,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
                M100_flags_t.auto_speed_value,
                M100_flags_t.brake_status,
                M100_flags_t.reverse_direction,
-               M100_flags_t.control_mode);    */}
+               M100_flags_t.control_mode);
+        HAL_CAN_AddTxMessage(&hcan2, &pTxHeader2, TxData, &TxMailbox2);
+        for (uint16_t f = 0; f < 10000; f++) {
+        	__asm("NOP");
+       	}*/
+    }
     else if (pRxHeader.StdId == 0x101)
     {
         m101 = 1;
@@ -301,219 +294,45 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
-	if (htim->Instance == TIM2)  // TIM2 kesmesi geldiyse
+	if (htim->Instance == TIM3)  // TIM2 kesmesi geldiyse
 	{
-		count++;
+		/*count++;
 		if (count > 100) {
 			count = 0;
-			printf("sending %ul\n", lastCanTick);
-		}
-		HAL_GPIO_TogglePin(Status_Led_GPIO_Port, Status_Led_Pin);
-	if (HAL_CAN_AddTxMessage(&hcan1, &pTxHeader2, TxData, &TxMailbox)
-				== HAL_OK) {
-			comm_timeout = 0;
-		} else {
-			comm_timeout += 100;  // 10 ms arttır (timer periodu kadar)
-		}
-		if (comm_timeout >= 500) {
+			printf("sending %lu\n", lastCanTick);
+		}*/
+		HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+	/*if (comm_timeout >= 500) {
 			HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET); // Örnek LED yak
 		} else {
 			HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_RESET); // Normalde kapalı
-		}
+		}*/
 	}
-	if (htim->Instance == TIM3)  // TIM3 kesmesi geldiyse
+	if (htim->Instance == TIM2)  // TIM3 kesmesi geldiyse
 	{
-		HAL_GPIO_TogglePin(IN_2_2_GPIO_Port, IN_2_2_Pin);
+		HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
+		//printf("sending toggle 2");
+	}
+	if (htim->Instance == TIM4)  // TIM3 kesmesi geldiyse
+	{
+		TxData[0] = 0x05;
+		TxData[1] = 0;
+	    TxData[2] = M100_flags_t.reverse_direction;
+		TxData[3] = M100_flags_t.control_mode;
+		TX_Ser_Val[2] = M100_flags_t.speed_value;
+		TX_Ser_Val[3] = M100_flags_t.speed_value;
+	    /*TxData[0] = 0x05;
+	    TxData[2] = 0x00;
+	    TxData[3] = 0xC0;
+	    TxData[4] = 0x08;
+	    TxData[5] = 0x07;
+	    TxData[6] = 0x08;
+	    TxData[7] = 0x07;*/
+		HAL_GPIO_TogglePin(Status_Led_GPIO_Port, Status_Led_Pin);
+		HAL_CAN_AddTxMessage(&hcan2, &pTxHeader2, TxData, &TxMailbox2);
+		//printf("sending can message");
 	}
 }
-
-void Brake_Engage(void)
-{
-    if (brake_state != 1) // Only engage if not already in the 'Engaging' state
-    {
-        HAL_GPIO_WritePin(Break_On_GPIO_Port, Break_On_Pin, GPIO_PIN_SET);
-        HAL_GPIO_WritePin(Break_Off_GPIO_Port, Break_Off_Pin, GPIO_PIN_RESET);
-        brake_timer1 = HAL_GetTick();  // Start brake timer
-        brake_state = 1;               // Set state to Engaging
-        // R1 tetiklemesini başlat
-        R1_triggered = 0;
-        R1_state = 0;
-    }
-
-    // R1 pini tetiklenmediyse işlemi başlat
-    if (R1_triggered == 0)
-    {
-        if (R1_state == 0)
-        {
-            HAL_GPIO_WritePin(R1_GPIO_Port, R1_Pin, GPIO_PIN_SET);
-            R1_start_time = HAL_GetTick();  // Zamanı başlat
-            R1_state = 1;
-        }
-        else if (R1_state == 1 && (HAL_GetTick() - R1_start_time >= 2500))
-        {
-            HAL_GPIO_WritePin(R1_GPIO_Port, R1_Pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(Break_On_GPIO_Port, Break_On_Pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(Break_Off_GPIO_Port, Break_Off_Pin, GPIO_PIN_RESET);
-            R1_triggered = 1;
-            R1_state = 0;
-        }
-    }
-}
-
-void Brake_Disengage(void)
-{
-    if (brake_state != 2) // Only disengage if not already in the 'Disengaging' state
-    {
-        HAL_GPIO_WritePin(Break_On_GPIO_Port, Break_On_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(Break_Off_GPIO_Port, Break_Off_Pin, GPIO_PIN_SET);
-
-        brake_timer1 = HAL_GetTick();  // Start timer
-        brake_state = 2;               // Set state to Disengaging
-
-        R1_triggered2 = 0;
-        R1_state2 = 0;
-    }
-    // R1 pini tetiklenmediyse işlemi başlat
-    if (R1_triggered2 == 0)
-    {
-        if (R1_state2 == 0)
-        {
-            HAL_GPIO_WritePin(R1_GPIO_Port, R1_Pin, GPIO_PIN_RESET);
-            R1_start_time2 = HAL_GetTick();  // Zamanı başlat
-            R1_state2 = 1;
-
-            R1_triggered2 = 0;
-            R1_state2 = 0;
-        }
-        else if (R1_state2 == 1 && (HAL_GetTick() - R1_start_time2 >= 2500))
-        {
-            HAL_GPIO_WritePin(Break_On_GPIO_Port, Break_On_Pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(Break_Off_GPIO_Port, Break_Off_Pin, GPIO_PIN_RESET);
-            R1_triggered2 = 1;
-            R1_state2 = 0;
-        }
-    }
-}
-
-void Brake_Release(void)
-{
-    if (brake_state != 0) // Only release if not already in the 'Released' state
-    {
-        HAL_GPIO_WritePin(Break_On_GPIO_Port, Break_On_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(Break_Off_GPIO_Port, Break_Off_Pin, GPIO_PIN_RESET);
-        brake_state = 0; // Set state to Released
-    }
-}
-
-void Brake_Update(void)
-{
-    // Check if we are in an active (Engaging or Disengaging) state
-    if (brake_state == 1 || brake_state == 2)
-    {
-        // Check if the required time has passed since the action started
-        if ((HAL_GetTick() - brake_timer1) >= 5000)
-        {
-            // After 1000ms, set both pins LOW (Release state)
-            Brake_Release();
-        }
-    }
-}
-
-void Check_Direction_Stability()
-{
-    uint32_t now = HAL_GetTick();  // Şu anki zamanı al (ms cinsinden)
-
-    if (M100_flags_t.direction_value != previous_direction_value)
-    {
-        // Değer değişti, zamanı güncelle
-        previous_direction_value = M100_flags_t.direction_value;
-        last_change_time = now;
-    }
-    else
-    {
-        // Değer değişmediyse 500 ms geçti mi diye kontrol et
-        if ((now - last_change_time) >= 250) // önceki 500 ms
-        {
-            M100_flags_t.direction_value = 0;
-            last_change_time = now;  // Sıfırladıktan sonra zamanı güncelle
-        }
-    }
-}
-
-void Check_Brake_Stability()
-{
-    uint32_t now2 = HAL_GetTick();  // Şu anki zamanı al (ms cinsinden)
-
-    if (M101_data_t.mine_emergency != previous_brake_value)
-    {
-        // Değer değişti, zamanı güncelle
-        previous_brake_value = M101_data_t.mine_emergency;
-        last_change_time2 = now2;
-    }
-    else
-    {
-        // Değer değişmediyse 500 ms geçti mi diye kontrol et
-        if ((now2 - last_change_time2) >= 500)
-        {
-            Brake_Release();
-            last_change_time2 = now2;  // Sıfırladıktan sonra zamanı güncelle
-        }
-    }
-}
-
-void EmergencyStop()
-{
-    if (M101_data_t.remote_emergency || M101_data_t.mine_emergency || M101_data_t.barrier_emergency || M100_flags_t.brake_status)
-    {
-        memset(received_data, 0, sizeof(received_data));
-        memset(a1, 0, sizeof(a1));
-
-        isInEmergencyState = true;
-        emergencyReleaseTime = HAL_GetTick();
-    }
-    else if ((!M101_data_t.remote_emergency && !M101_data_t.mine_emergency && !M101_data_t.barrier_emergency && !M100_flags_t.brake_status))
-    {
-        isInEmergencyState = false;
-    }
-}
-
-void StopAllMotors(void)
-{
-    HAL_GPIO_WritePin(R_EN_GPIO_Port, R_EN_Pin, GPIO_PIN_RESET);   // Sağ motor durdur
-    HAL_GPIO_WritePin(L_EN_GPIO_Port, L_EN_Pin, GPIO_PIN_RESET);   // Sol motor durdur
-}
-
-void motor_control(void) {
-    uint16_t speed = i_speed_value;
-    const uint16_t DEAD_ZONE = 10;
-
-    // --- 1. Komut tipi sabit ---
-    TxData[0] = 0x05;
-	TxData[3] = 0xA0;
-    // --- 2. Yön belirleme ---
-    if (speed > DEAD_ZONE) {
-        // Geri
-        TxData[2] = 0x40;
-    }
-    else if (speed < DEAD_ZONE) {
-        // İleri
-        TxData[2] = 0x00;
-    }
-    else {
-        // Ölü bölge (dur)
-        speed = 0;
-    }
-    // --- 3. Hız verisini aktar ---
-	TX_Ser_Val[2] = speed;
-	TX_Ser_Val[3] = speed;
-    // --- 4. CAN mesajı gönder ---
-	HAL_CAN_AddTxMessage(&hcan2, &pTxHeader2, TxData, &TxMailbox);
-	pwm_value1 = (uint16_t)((speed * 2000) / 1000);//1200 is peak
-	pwm_value2 = (uint16_t)((speed * 2000) / 1000);
-    HAL_DAC_SetValue(&hdac, DAC_CHANNEL_1, DAC_ALIGN_12B_R, pwm_value1);
-    HAL_DAC_SetValue(&hdac, DAC_CHANNEL_2, DAC_ALIGN_12B_R, pwm_value2);
-}
-
 /* USER CODE END 0 */
 
 /**
@@ -551,19 +370,12 @@ int main(void)
   MX_USART2_UART_Init();
   MX_CAN2_Init();
   MX_TIM3_Init();
+  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Base_Start(&htim2);
   HAL_TIM_Base_Start_IT(&htim2);
-  HAL_TIM_Base_Start(&htim3);
   HAL_TIM_Base_Start_IT(&htim3);
+  HAL_TIM_Base_Start_IT(&htim4);
   TX_Ser_Val = (int16_t *)&TxData[0];
-
-    pTxHeader.StdId = 0x205;
-    pTxHeader.DLC = 8;
-    pTxHeader.IDE = CAN_ID_STD;
-    pTxHeader.RTR = CAN_RTR_DATA;
-    pTxHeader.ExtId = 0;
-    pTxHeader.TransmitGlobalTime = DISABLE;
 
     pTxHeader2.ExtId = 0x10F83807;
     pTxHeader2.IDE = CAN_ID_EXT;
@@ -591,17 +403,11 @@ int main(void)
         Error_Handler();
     }
     uint8_t spPager = 0x00;
-
     if (HAL_CAN_AddTxMessage(&hcan2, &pTxHeader, &spPager, &pTxMailbox2) != HAL_OK)
     {
         Error_Handler();
     }
 
-    // HAL_CAN_Start(&hcan1);
-    HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
-    HAL_DAC_Start(&hdac, DAC_CHANNEL_2);
-
-    //HAL_ADC_Start_DMA(&hadc1, Actuator_Feedback, 2);
     TxData[0] = 0x05;
     TxData[2] = 0x00;
     TxData[3] = 0xC0;
@@ -618,73 +424,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-   	  EmergencyStop();
-  	  Check_Direction_Stability();
-  	      if (!isInEmergencyState)
-  	      {
-  	          // If not in emergency, the brake should be in the ENGAGED state.
-  	          //Brake_Engage(); // This will only run if brake_state is NOT 1 (Engaging)
-  	    	  Brake_Disengage();
-  	    	  motor_control();
-
-  	          // Yön komutu 200 ile 1000 arasındaysa (Sağa dönme)
-  	          if (M100_flags_t.direction_value >= 200 && M100_flags_t.direction_value <= 1000)
-  	          {
-  	              // Sol motor ON, Sağ motor OFF
-  	              HAL_GPIO_WritePin(R_EN_GPIO_Port, R_EN_Pin, GPIO_PIN_RESET);   // Sağ motor durur
-  	              HAL_GPIO_WritePin(L_EN_GPIO_Port, L_EN_Pin, GPIO_PIN_SET);     // Sol motor çalışır
-
-  	              HAL_GPIO_WritePin(R2_GPIO_Port, R2_Pin, GPIO_PIN_RESET);
-
-  	              // Durum sıfırlanır, bir sonraki merkezlenmede R2 tekrar set edilebilsin
-  	              R2_triggered = 0;
-  	              R2_state = 0;
-  	          }
-  	          // Yön komutu -1000 ile -200 arasındaysa (Sola dönme)
-  	          else if (M100_flags_t.direction_value < -200 && M100_flags_t.direction_value >= -1000)
-  	          {
-  	              // Sağ motor ON, Sol motor OFF
-  	              HAL_GPIO_WritePin(R_EN_GPIO_Port, R_EN_Pin, GPIO_PIN_SET);     // Sağ motor çalışır
-  	              HAL_GPIO_WritePin(L_EN_GPIO_Port, L_EN_Pin, GPIO_PIN_RESET);   // Sol motor durur
-
-  	              HAL_GPIO_WritePin(R2_GPIO_Port, R2_Pin, GPIO_PIN_RESET);
-
-  	              // Durum sıfırlanır
-  	              R2_triggered = 0;
-  	              R2_state = 0;	          }
-  	          // Komut 200 ile -200 arasındaysa (Merkez veya durma)
-  	          else
-  	          {
-  	              HAL_GPIO_WritePin(R_EN_GPIO_Port, R_EN_Pin, GPIO_PIN_RESET);     // Sağ motor durur
-  	              HAL_GPIO_WritePin(L_EN_GPIO_Port, L_EN_Pin, GPIO_PIN_RESET);   // Sol motor durur
-
-  	              if (R2_triggered == 0)
-  	              {
-  	                  if (R2_state == 0)
-  	                  {
-  	                      // R2 SET edilir ve zaman başlatılır
-  	                      HAL_GPIO_WritePin(R2_GPIO_Port, R2_Pin, GPIO_PIN_SET);
-  	                      R2_start_time = HAL_GetTick();  // Mevcut zamanı al
-  	                      R2_state = 1;
-  	                  }
-  	                  else if (R2_state == 1 && (HAL_GetTick() - R2_start_time >= 1000))
-  	                  {
-  	                      // 500ms sonra R2 RESET edilir ve işlem tamamlanır
-  	                      HAL_GPIO_WritePin(R2_GPIO_Port, R2_Pin, GPIO_PIN_RESET);
-  	                      R2_triggered = 1;  // Bir daha tetiklenmemesi için
-  	                      R2_state = 0;
-  	                  }
-  	              }
-  	          }
-
-  	      } else {
-  	          // If in emergency, the brake should be in the DISENGAGED state.
-  	         // Brake_Disengage(); // This will only run if brake_state is NOT 2 (Disengaging)
-  	    	  Brake_Engage();
-  	    	  StopAllMotors();
-  	      }
     }
-
   /* USER CODE END 3 */
 }
 
@@ -891,7 +631,7 @@ static void MX_TIM2_Init(void)
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim2.Init.Period = 999;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
   {
     Error_Handler();
@@ -934,9 +674,9 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 160*20-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 9999;
+  htim3.Init.Period = 999;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
   {
     Error_Handler();
@@ -955,6 +695,51 @@ static void MX_TIM3_Init(void)
   /* USER CODE BEGIN TIM3_Init 2 */
 
   /* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
+  * @brief TIM4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM4_Init(void)
+{
+
+  /* USER CODE BEGIN TIM4_Init 0 */
+
+  /* USER CODE END TIM4_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM4_Init 1 */
+
+  /* USER CODE END TIM4_Init 1 */
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 160*20-1;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 999;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM4_Init 2 */
+
+  /* USER CODE END TIM4_Init 2 */
 
 }
 
@@ -1059,7 +844,7 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, IN_1_2_Pin|IN_2_1_Pin|LED1_Pin|Status_Led_Pin
-                          |IN_2_2_Pin, GPIO_PIN_RESET);
+                          |LED2_Pin|IN_2_2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : Break_On_Pin L_EN_Pin R_EN_Pin */
   GPIO_InitStruct.Pin = Break_On_Pin|L_EN_Pin|R_EN_Pin;
@@ -1098,13 +883,17 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(IN_1_1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : IN_1_2_Pin IN_2_1_Pin LED1_Pin Status_Led_Pin
-                           IN_2_2_Pin */
+                           LED2_Pin IN_2_2_Pin */
   GPIO_InitStruct.Pin = IN_1_2_Pin|IN_2_1_Pin|LED1_Pin|Status_Led_Pin
-                          |IN_2_2_Pin;
+                          |LED2_Pin|IN_2_2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
